@@ -257,12 +257,12 @@ cmd_launch_chatgpt() {
   CP="http://127.0.0.1:$(cfg_get connect_proxy_port 8944)"
   if pgrep -x ChatGPT >/dev/null; then echo "ChatGPT 已在运行(需代理参数请先退出再冷启动)"; open -a ChatGPT; exit 0; fi
   open -a ChatGPT \
-    --env HTTPS_PROXY=$CP --env https_proxy=$CP --env ALL_PROXY=$SOCKS \
-    --env NO_PROXY=localhost,127.0.0.1,::1 \
-    --env SSL_CERT_FILE=$CERTS/ca.pem --env CODEX_CA_CERTIFICATE=$CERTS/ca.pem \
-    --env NODE_EXTRA_CA_CERTS=$CERTS/ca.pem \
-    --env WS_PROXY=$CP --env WSS_PROXY=$CP \
-    --args --proxy-server=$SOCKS
+    --env "HTTPS_PROXY=$CP" --env "https_proxy=$CP" --env "ALL_PROXY=$SOCKS" \
+    --env "NO_PROXY=localhost,127.0.0.1,::1" \
+    --env "SSL_CERT_FILE=$CERTS/ca.pem" --env "CODEX_CA_CERTIFICATE=$CERTS/ca.pem" \
+    --env "NODE_EXTRA_CA_CERTS=$CERTS/ca.pem" \
+    --env "WS_PROXY=$CP" --env "WSS_PROXY=$CP" \
+    --args --proxy-server="$SOCKS"
   echo "ChatGPT 已带增强参数冷启动"
 }
 
