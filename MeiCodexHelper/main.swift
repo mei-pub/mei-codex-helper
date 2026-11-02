@@ -111,11 +111,9 @@ struct Profile: Codable, Identifiable, Equatable {
                 remote_control: true, watch_interval_sec: 60)
     }
     static func fromConfig(_ name: String) -> Profile {
-        let cfg = Engine.run(["open-config"])
-        _ = cfg
         var p = Profile.blank(name: name)
-        let json = try? String(contentsOfFile: ProfileStore.configPath, encoding: .utf8)
-        if let data = json?.data(using: .utf8), let d = try? JSONDecoder().decode([String: JSONValue].self, from: data) {
+        let json = (try? String(contentsOfFile: ProfileStore.configPath, encoding: .utf8)) ?? ""
+        if let data = json.data(using: .utf8), let d = try? JSONDecoder().decode([String: JSONValue].self, from: data) {
             if let v = d["clash_socks_host"]?.stringValue { p.clash_socks_host = v }
             if let v = d["clash_socks_port"]?.intValue { p.clash_socks_port = v }
             if let v = d["relay_tls_port"]?.intValue { p.relay_tls_port = v }
@@ -254,7 +252,7 @@ struct MeiCodexHelperApp: App {
 
         Window("MeiCodexHelper 控制台", id: "console") { ConsoleView().environmentObject(status) }
 
-        Window("MeiCodexHelper 设置", id: "settings") { SettingsView() }
+        Window("MeiCodexHelper 设置", id: "settings") { SettingsView().environmentObject(status) }
     }
 }
 
@@ -309,7 +307,7 @@ struct MenuContent: View {
 
             // 快捷操作 (2×2 网格)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                panelButton("火箭", "rocket", prominent: true) {
+                panelButton("启动 ChatGPT", "rocket", prominent: true) {
                     status.act(["launch-chatgpt"], label: "启动 ChatGPT")
                 }
                 panelButton("重启服务", "arrow.triangle.2.circlepath") {
@@ -371,6 +369,7 @@ struct MenuContent: View {
 
 struct ConsoleView: View {
     @EnvironmentObject var status: StatusStore
+    @Environment(\.openWindow) private var openWindow
     @State private var logSource = "relay"
     @State private var logText = ""
     @State private var autoRefresh = true
@@ -419,6 +418,9 @@ struct ConsoleView: View {
             Button { status.act(["restart"], label: "重启服务") } label: {
                 Label("重启", systemImage: "arrow.triangle.2.circlepath")
             }.buttonStyle(.bordered)
+            Button { openWindow(id: "settings"); activateApp() } label: {
+                Image(systemName: "gearshape")
+            }.buttonStyle(.bordered).help("设置")
             Menu {
                 Button(role: .destructive) { showStopConfirm = true } label: { Label("停止服务…", systemImage: "stop.circle") }
                 Button { status.doctorOutput = nil; status.busy = true
@@ -462,11 +464,12 @@ struct ConsoleView: View {
                 ScrollView {
                     Text(logText.isEmpty ? "暂无日志" : logText)
                         .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.75, green: 0.92, blue: 0.78))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .id("logtail")
                 }
-                .background(.black.opacity(0.86))
+                .background(Color(red: 0.08, green: 0.10, blue: 0.08))
                 .onAppear { proxy.scrollTo("logtail", anchor: .bottom) }
             }
         }
