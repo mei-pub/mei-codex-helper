@@ -236,23 +236,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
 }
 
+enum MainTab: String { case console, settings }
+
+final class TabRouter: ObservableObject {
+    @Published var tab: MainTab = .console
+}
+
 @main
 struct MeiCodexHelperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var dlg
     @StateObject private var status = StatusStore()
+    @StateObject private var router = TabRouter()
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent(status: status)
                 .environmentObject(ProfileStore())
+                .environmentObject(router)
         } label: {
             Image(systemName: status.allOK ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
         }
         .menuBarExtraStyle(.window)
 
-        Window("MeiCodexHelper 控制台", id: "console") { ConsoleView().environmentObject(status) }
+        Window("MeiCodexHelper", id: "main") {
+            MainTabView().environmentObject(status).environmentObject(router)
+        }
+    }
+}
 
-        Window("MeiCodexHelper 设置", id: "settings") { SettingsView().environmentObject(status) }
+struct MainTabView: View {
+    @EnvironmentObject var router: TabRouter
+    @EnvironmentObject var status: StatusStore
+
+    var body: some View {
+        TabView(selection: $router.tab) {
+            ConsoleView().tabItem { Label("控制台", systemImage: "square.grid.2x2") }.tag(MainTab.console)
+            SettingsView().tabItem { Label("设置", systemImage: "gearshape") }.tag(MainTab.settings)
+        }
+        .frame(minWidth: 760, minHeight: 560)
     }
 }
 
@@ -266,6 +287,7 @@ struct MenuContent: View {
     @ObservedObject var status: StatusStore
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var router: TabRouter
 
     var body: some View {
         VStack(spacing: 10) {
@@ -307,17 +329,17 @@ struct MenuContent: View {
 
             // 快捷操作 (2×2 网格)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                panelButton("启动 ChatGPT", "rocket", prominent: true) {
+                panelButton("启动 ChatGPT", "paperplane.fill", prominent: true) {
                     status.act(["launch-chatgpt"], label: "启动 ChatGPT")
                 }
                 panelButton("重启服务", "arrow.triangle.2.circlepath") {
                     status.act(["restart"], label: "重启服务")
                 }
                 panelButton("控制台", "square.grid.2x2") {
-                    dismiss(); openWindow(id: "console"); activateApp()
+                    router.tab = .console; dismiss(); openWindow(id: "main"); activateApp()
                 }
                 panelButton("设置", "gearshape") {
-                    dismiss(); openWindow(id: "settings"); activateApp()
+                    router.tab = .settings; dismiss(); openWindow(id: "main"); activateApp()
                 }
             }
 
@@ -369,7 +391,7 @@ struct MenuContent: View {
 
 struct ConsoleView: View {
     @EnvironmentObject var status: StatusStore
-    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject var router: TabRouter
     @State private var logSource = "relay"
     @State private var logText = ""
     @State private var autoRefresh = true
@@ -418,7 +440,7 @@ struct ConsoleView: View {
             Button { status.act(["restart"], label: "重启服务") } label: {
                 Label("重启", systemImage: "arrow.triangle.2.circlepath")
             }.buttonStyle(.bordered)
-            Button { openWindow(id: "settings"); activateApp() } label: {
+            Button { router.tab = .settings } label: {
                 Image(systemName: "gearshape")
             }.buttonStyle(.bordered).help("设置")
             Menu {
@@ -552,6 +574,7 @@ struct ServiceCard: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var status: StatusStore
+    @EnvironmentObject var router: TabRouter
     @StateObject private var store = ProfileStore()
     @State private var selection: String?
     @State private var draft: Profile?
