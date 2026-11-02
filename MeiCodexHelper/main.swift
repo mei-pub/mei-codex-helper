@@ -250,7 +250,7 @@ struct MeiCodexHelperApp: App {
         } label: {
             Image(systemName: status.allOK ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Window("MeiCodexHelper 控制台", id: "console") { ConsoleView().environmentObject(status) }
 
@@ -262,65 +262,108 @@ func activateApp() {
     NSApp.activate(ignoringOtherApps: true)
 }
 
-// MARK: - 菜单栏
+// MARK: - 菜单栏弹出面板 (.window 样式, 完全自定义布局)
 
 struct MenuContent: View {
     @ObservedObject var status: StatusStore
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack { Divider() }  // 顶部占位分隔
-
-        HStack(spacing: 6) {
-            Image(systemName: status.allOK ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(status.allOK ? .green : .orange)
-            Text(status.allOK ? "全部服务正常" : "异常 \(status.services.count - status.okCount) 项")
-                .font(.system(size: 12, weight: .semibold))
-        }
-
-        Divider()
-
-        Button { openWindow(id: "console"); activateApp() } label: {
-            Label("打开控制台", systemImage: "square.grid.2x2")
-        }
-        Button { openWindow(id: "settings"); activateApp() } label: {
-            Label("设置…", systemImage: "gearshape")
-        }
-
-        Divider()
-
-        Button { status.act(["launch-chatgpt"], label: "启动 ChatGPT") } label: {
-            Label("启动 ChatGPT (增强)", systemImage: "rocket")
-        }
-        Button { status.act(["restart"], label: "重启服务") } label: {
-            Label("重启增强服务", systemImage: "arrow.triangle.2.circlepath")
-        }
-
-        Divider()
-
-        ForEach(status.services) { s in
-            HStack {
-                Image(systemName: StatusStore.icon(for: s.id))
-                Text(s.name)
+        VStack(spacing: 10) {
+            // 头部: 整体状态
+            HStack(spacing: 8) {
+                Image(systemName: status.allOK ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(status.allOK ? .green : .orange)
+                    .font(.system(size: 15))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MeiCodexHelper").font(.system(size: 12, weight: .bold))
+                    Text(status.allOK ? "全部服务正常" : "异常 \(status.services.count - status.okCount) 项")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Circle().fill(s.isOK ? Color.green : Color.red).frame(width: 8, height: 8)
+                if status.busy { ProgressView().controlSize(.mini) }
+            }
+
+            // 服务状态列表(紧凑两列: 图标+名称 | 状态点)
+            VStack(spacing: 4) {
+                ForEach(status.services) { s in
+                    HStack(spacing: 8) {
+                        Image(systemName: StatusStore.icon(for: s.id))
+                            .font(.system(size: 12))
+                            .foregroundStyle(s.isOK ? .primary : .secondary)
+                            .frame(width: 16)
+                        Text(s.name).font(.system(size: 11)).lineLimit(1)
+                        Spacer()
+                        Text(s.isOK ? "正常" : "停止")
+                            .font(.system(size: 10))
+                            .foregroundStyle(s.isOK ? .green : .red)
+                        Circle().fill(s.isOK ? Color.green : Color.red).frame(width: 7, height: 7)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            Divider()
+
+            // 快捷操作 (2×2 网格)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                panelButton("火箭", "rocket", prominent: true) {
+                    status.act(["launch-chatgpt"], label: "启动 ChatGPT")
+                }
+                panelButton("重启服务", "arrow.triangle.2.circlepath") {
+                    status.act(["restart"], label: "重启服务")
+                }
+                panelButton("控制台", "square.grid.2x2") {
+                    dismiss(); openWindow(id: "console"); activateApp()
+                }
+                panelButton("设置", "gearshape") {
+                    dismiss(); openWindow(id: "settings"); activateApp()
+                }
+            }
+
+            Divider()
+
+            // 底部行
+            HStack {
+                panelButton("诊断", "stethoscope") {
+                    status.act(["doctor"], label: "诊断")
+                }
+                panelButton("日志", "folder") {
+                    Engine.run(["open-logs"])
+                }
+                Spacer()
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                        .font(.system(size: 12))
+                        .padding(5)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help("退出 MeiCodexHelper")
             }
         }
+        .padding(12)
+        .frame(width: 290)
+        .onAppear { status.refresh() }
+    }
 
-        Divider()
-
-        Button { status.act(["doctor"], label: "诊断") } label: {
-            Label("诊断", systemImage: "stethoscope")
+    private func panelButton(_ title: String, _ icon: String, prominent: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(title).font(.system(size: 11, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(prominent ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(.quaternary),
+                        in: RoundedRectangle(cornerRadius: 7))
         }
-        Button { Engine.run(["open-logs"]) } label: {
-            Label("日志文件夹", systemImage: "folder")
-        }
-
-        Divider()
-
-        Button { NSApp.terminate(nil) } label: {
-            Label("退出 MeiCodexHelper", systemImage: "power")
-        }
+        .buttonStyle(.plain)
+        .foregroundStyle(prominent ? Color.accentColor : .primary)
     }
 }
 
