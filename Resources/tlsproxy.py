@@ -5,7 +5,7 @@
 CONNECT 上游经 SOCKS5 隧道到目标; 回环目标直连。参数见 config.json。"""
 import socket, ssl, threading, json, os, time
 
-AS_DIR = os.path.expanduser('~/Library/Application Support/ChatGPTChinaHelper')
+AS_DIR = os.path.expanduser('~/Library/Application Support/MeiCodexHelper')
 try:
     _c = json.load(open(os.path.join(AS_DIR, 'config.json')))
 except Exception:

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ChatGPT China Helper — 看门狗: 每次运行检查三个端口 + relay 功能, 异常自动 kickstart
-AS="$HOME/Library/Application Support/ChatGPTChinaHelper"
+AS="$HOME/Library/Application Support/MeiCodexHelper"
 CFG="$AS/config.json"
 PY=/usr/bin/python3
 U=$(id -u)

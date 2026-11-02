@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ChatGPT China Helper — Relay 服务
 本地反向转发器: TLS(默认8943) + 明文(默认8945) -> curl_cffi(Safari指纹) via SOCKS -> chatgpt.com
-全部参数来自 ~/Library/Application Support/ChatGPTChinaHelper/config.json
+全部参数来自 ~/Library/Application Support/MeiCodexHelper/config.json
 功能: 路径重写(/api剥离、/backend-api挂载) / 请求响应头改写 / wss URL重写+WS隧道 / 访问日志
 """
 import time
@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from curl_cffi import requests as cr
 
 # ---------- 配置 ----------
-AS_DIR = os.path.expanduser('~/Library/Application Support/ChatGPTChinaHelper')
+AS_DIR = os.path.expanduser('~/Library/Application Support/MeiCodexHelper')
 CFG_PATH = os.path.join(AS_DIR, 'config.json')
 try:
     _c = json.load(open(CFG_PATH))
