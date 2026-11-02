@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>ChatGPT China Helper</string>
+  <key>CFBundleDisplayName</key><string>ChatGPT China Helper</string>
+  <key>CFBundleIdentifier</key><string>local.chatgpt.cnhelper</string>
+  <key>CFBundleExecutable</key><string>ChatGPTChinaHelper</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDescription</key><string>ChatGPT macOS 桌面端中国网络访问增强: 指纹中继 + TLS自适应代理 + 一键代理启动 + 守护</string>
+</dict>
+</plist>
