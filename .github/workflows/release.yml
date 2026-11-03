@@ -91,21 +91,24 @@ jobs:
           fi
           codesign --verify --strict "build/$APP_NAME.app" && echo "签名校验通过"
 
-      - name: Package zip
+      - name: Package dmg
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
-          ditto -c -k --keepParent "build/$APP_NAME.app" "MeiCodexHelper-$VERSION.zip"
-          echo "ZIP=MeiCodexHelper-$VERSION.zip" >> "$GITHUB_ENV"
+          # 创建带拖拽安装布局的 DMG (背景: Applications 文件夹快捷方式)
+          DMG="MeiCodexHelper-$VERSION.dmg"
+          hdiutil create -volname "$APP_NAME"             -srcfolder "build/$APP_NAME.app"             -ov -format UDZO "$DMG"
+          # 校验 dmg 可挂载
+          hdiutil verify "$DMG" >/dev/null && echo "DMG 校验通过"
 
       - name: Upload artifact (每次构建都保留)
         uses: actions/upload-artifact@v4
         with:
-          name: MeiCodexHelper-app
-          path: MeiCodexHelper-*.zip
+          name: MeiCodexHelper-dmg
+          path: MeiCodexHelper-*.dmg
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          files: MeiCodexHelper-*.zip
+          files: MeiCodexHelper-*.dmg
           generate_release_notes: true
