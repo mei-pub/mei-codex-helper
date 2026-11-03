@@ -80,7 +80,7 @@ flowchart TB
 ./build.sh   # 需 Xcode Command Line Tools (swiftc)
 ```
 
-或直接推送 `v*` 标签，GitHub Actions 自动构建签名并发布 Release（签名/公证参数见 workflow 内注释，通过仓库 Secrets 配置，全部可选——不配置时使用 ad-hoc 签名）。
+或直接推送 `v*` 标签，GitHub Actions 自动构建签名并发布 Release（签名仅需 2 个可选 Secrets（MACOS_CERT_P12_BASE64 / MACOS_CERT_P12_PASSWORD，签名身份自动提取），不配置时使用 ad-hoc 签名）。
 
 ## 排障速查
 
