@@ -25,8 +25,8 @@ except Exception:
 
 PORT = int(_c.get('relay_tls_port', 8943))
 PLAIN_PORT = int(_c.get('relay_plain_port', 8945))
-SOCKS_HOST = _c.get('clash_socks_host', '127.0.0.1')
-SOCKS_PORT = int(_c.get('clash_socks_port', 7890))
+SOCKS_HOST = _c.get('proxy_socks_host', _c.get('clash_socks_host', '127.0.0.1'))
+SOCKS_PORT = int(_c.get('proxy_socks_port', _c.get('clash_socks_port', 7890)))
 SOCKS = (SOCKS_HOST, SOCKS_PORT)
 UP_HOST = _c.get('upstream_host', 'chatgpt.com')
 UP = 'https://' + UP_HOST

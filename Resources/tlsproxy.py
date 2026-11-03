@@ -12,8 +12,8 @@ except Exception:
     _c = {}
 
 LISTEN_PORT = int(_c.get('connect_proxy_port', 8944))
-SOCKS_HOST = _c.get('clash_socks_host', '127.0.0.1')
-SOCKS_PORT = int(_c.get('clash_socks_port', 7890))
+SOCKS_HOST = _c.get('proxy_socks_host', _c.get('clash_socks_host', '127.0.0.1'))
+SOCKS_PORT = int(_c.get('proxy_socks_port', _c.get('clash_socks_port', 7890)))
 SOCKS = (SOCKS_HOST, SOCKS_PORT)
 CERTS = os.path.join(AS_DIR, 'certs')
 CERT = os.path.join(CERTS, 'cert.pem')

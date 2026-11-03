@@ -1,0 +1,86 @@
+name: Release Build
+
+# 触发: 推送 v* 标签 或 手动运行
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      # ---- 可选签名参数 (全部可空; 未配置时自动使用 ad-hoc 签名) ----
+      # 公仓建议放 Secrets: 仓库 Settings → Secrets and variables → Actions → Secrets
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}     # Developer ID 证书 .p12 的 base64
+      MACOS_CERT_P12_PASSWORD: ${{ secrets.MACOS_CERT_P12_PASSWORD }} # .p12 导出密码
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}         # 如 "Developer ID Application: Your Name (TEAMID)"
+      # ---- 可选公证参数 (配置后自动公证+装订, 未配置跳过) ----
+      APPLE_ID: ${{ secrets.APPLE_ID }}                               # Apple ID 邮箱
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }} # app-specific password
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_NAME: MeiCodexHelper
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app
+        run: ./build.sh
+
+      - name: Import signing certificate (optional)
+        if: env.MACOS_CERT_P12_BASE64 != ''
+        env:
+          P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          PWD_: ${{ secrets.MACOS_CERT_P12_PASSWORD }}
+        run: |
+          echo "$P12" | base64 --decode > /tmp/cert.p12
+          KC=/tmp/build.keychain
+          security create-keychain -p buildci "$KC" || true
+          security default-keychain -s "$KC"
+          security unlock-keychain -p buildci "$KC"
+          security import /tmp/cert.p12 -k "$KC" -P "$PWD_" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k buildci "$KC"
+          security set-keychain-settings -t 3600 "$KC"
+
+      - name: Sign (Developer ID or ad-hoc fallback)
+        run: |
+          if [ -n "$MACOS_SIGN_IDENTITY" ]; then
+            echo "使用身份签名: $MACOS_SIGN_IDENTITY"
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "build/$APP_NAME.app"
+          else
+            echo "未配置签名身份, 使用 ad-hoc 签名"
+            codesign --force -s - --deep "build/$APP_NAME.app"
+          fi
+          codesign --verify --strict "build/$APP_NAME.app" && echo "签名校验通过"
+
+      - name: Notarize & staple (optional)
+        if: env.APPLE_ID != ''
+        run: |
+          ditto -c -k --keepParent "build/$APP_NAME.app" "/tmp/$APP_NAME.app.zip"
+          xcrun notarytool submit "/tmp/$APP_NAME.app.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          xcrun stapler staple "build/$APP_NAME.app"
+
+      - name: Package zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --keepParent "build/$APP_NAME.app" "MeiCodexHelper-$VERSION.zip"
+          echo "ZIP=MeiCodexHelper-$VERSION.zip" >> "$GITHUB_ENV"
+
+      - name: Upload artifact (每次构建都保留)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeiCodexHelper-app
+          path: MeiCodexHelper-*.zip
+
+      - name: Create GitHub Release (tag 触发时)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MeiCodexHelper-*.zip
+          generate_release_notes: true

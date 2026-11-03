@@ -21,14 +21,19 @@ cfg_get() {
   if [ ! -f "$CFG" ]; then echo "$2"; return; fi
   $PY -c "import json;d=json.load(open('$CFG'));print(d.get('$1','$2'))" 2>/dev/null || echo "$2"
 }
+# 读取配置(键名历史兼容: 新键优先, 旧键回退)
+cfg_get_any() {
+  if [ ! -f "$CFG" ]; then echo "$3"; return; fi
+  $PY -c "import json;d=json.load(open('$CFG'));print(d.get('$1', d.get('$2', '$3')))" 2>/dev/null || echo "$3"
+}
 
 write_default_config() {
   [ -f "$CFG" ] && return 0
   mkdir -p "$AS"
   cat > "$CFG" <<'EOF'
 {
-  "clash_socks_host": "127.0.0.1",
-  "clash_socks_port": 7890,
+  "proxy_socks_host": "127.0.0.1",
+  "proxy_socks_port": 7890,
   "relay_tls_port": 8943,
   "relay_plain_port": 8945,
   "connect_proxy_port": 8944,
@@ -82,7 +87,7 @@ ensure_certs() {
 ensure_curl_cffi() {
   $PY -c "from curl_cffi import requests" 2>/dev/null && return 0
   echo "安装 curl_cffi (经代理)..."
-  SOCKS=$(cfg_get clash_socks_host 127.0.0.1):$(cfg_get clash_socks_port 7890)
+  SOCKS=$(cfg_get_any proxy_socks_host clash_socks_host 127.0.0.1):$(cfg_get_any proxy_socks_port clash_socks_port 7890)
   $PY -m pip install --user --quiet --proxy "http://$SOCKS" curl_cffi 2>&1 | tail -1
   $PY -c "from curl_cffi import requests" 2>/dev/null && echo "curl_cffi OK" || echo "⚠️ curl_cffi 安装失败"
 }
@@ -181,19 +186,37 @@ socks_up() { curl -s -m 3 -o /dev/null -x socks5h://127.0.0.1:$1 "https://www.gs
 
 collect_status() {  # 每行: id|名称|ok|down
   TLS=$(cfg_get relay_tls_port 8943); PLAIN=$(cfg_get relay_plain_port 8945)
-  CP=$(cfg_get connect_proxy_port 8944); SOCKS=$(cfg_get clash_socks_port 7890)
+  CP=$(cfg_get connect_proxy_port 8944); SOCKS=$(cfg_get_any proxy_socks_port clash_socks_port 7890)
   port_up "$TLS"    && echo "relay|Relay 中继 · HTTPS :$TLS|ok" || echo "relay|Relay 中继 · HTTPS :$TLS|down"
   port_up "$PLAIN"  && echo "relayplain|Relay 中继 · 明文 :$PLAIN|ok" || echo "relayplain|Relay 中继 · 明文 :$PLAIN|down"
   port_up "$CP"     && echo "connect|CONNECT 代理 · :$CP|ok" || echo "connect|CONNECT 代理 · :$CP|down"
-  socks_up "$SOCKS" && echo "clash|Clash SOCKS · :$SOCKS|ok" || echo "clash|Clash SOCKS · :$SOCKS|down"
+  socks_up "$SOCKS" && echo "proxy|上游代理 (SOCKS :$SOCKS)|ok" || echo "proxy|上游代理 (SOCKS :$SOCKS)|down"
   pgrep -x ChatGPT >/dev/null && echo "chatgpt|ChatGPT 桌面端|ok" || echo "chatgpt|ChatGPT 桌面端|down"
   pgrep -f "app-server --remote-control" >/dev/null && echo "daemon|远程控制 Daemon|ok" || echo "daemon|远程控制 Daemon|down"
 }
 
 # ---------- 命令 ----------
+migrate_config_keys() {
+  [ -f "$CFG" ] || return 0
+  $PY - <<'PYEOF'
+import json, os
+p = os.path.expanduser('~/Library/Application Support/MeiCodexHelper/config.json')
+d = json.load(open(p))
+ch = False
+for old, new in (('clash_socks_host','proxy_socks_host'), ('clash_socks_port','proxy_socks_port')):
+    if old in d and new not in d:
+        d[new] = d.pop(old); ch = True
+    elif old in d:
+        d.pop(old); ch = True
+if ch:
+    json.dump(d, open(p,'w'), indent=2, ensure_ascii=False); print('配置键已迁移为 proxy_socks_*')
+PYEOF
+}
+
 cmd_install() {
   echo "== $APP_NAME 安装 =="
   migrate_old
+  migrate_config_keys
   write_default_config
   mkdir -p "$AS/bin" "$LOGS"
   cp "$RES/relay.py" "$RES/tlsproxy.py" "$RES/netwatch.sh" "$AS/bin/" 2>/dev/null
@@ -253,7 +276,7 @@ cmd_log() {
 }
 
 cmd_launch_chatgpt() {
-  SOCKS="socks5://$(cfg_get clash_socks_host 127.0.0.1):$(cfg_get clash_socks_port 7890)"
+  SOCKS="socks5://$(cfg_get_any proxy_socks_host clash_socks_host 127.0.0.1):$(cfg_get_any proxy_socks_port clash_socks_port 7890)"
   CP="http://127.0.0.1:$(cfg_get connect_proxy_port 8944)"
   if pgrep -x ChatGPT >/dev/null; then echo "ChatGPT 已在运行(需代理参数请先退出再冷启动)"; open -a ChatGPT; exit 0; fi
   open -a ChatGPT \

@@ -73,7 +73,7 @@ final class StatusStore: ObservableObject {
         case "relay": return "arrow.triangle.2.circlepath.circle.fill"
         case "relayplain": return "bolt.horizontal.circle.fill"
         case "connect": return "network.circle.fill"
-        case "clash": return "globe.asia.southeast.fill"
+        case "proxy": return "globe.asia.southeast.fill"
         case "chatgpt": return "bubble.left.and.text.bubble.right.fill"
         case "daemon": return "desktopcomputer.and.arrow.down"
         default: return "circle.fill"
@@ -94,8 +94,8 @@ final class StatusStore: ObservableObject {
 struct Profile: Codable, Identifiable, Equatable {
     var id: String { name }
     var name: String
-    var clash_socks_host: String
-    var clash_socks_port: Int
+    var proxy_socks_host: String
+    var proxy_socks_port: Int
     var relay_tls_port: Int
     var relay_plain_port: Int
     var connect_proxy_port: Int
@@ -105,7 +105,7 @@ struct Profile: Codable, Identifiable, Equatable {
     var watch_interval_sec: Int
 
     static func blank(name: String) -> Profile {
-        Profile(name: name, clash_socks_host: "127.0.0.1", clash_socks_port: 7890,
+        Profile(name: name, proxy_socks_host: "127.0.0.1", proxy_socks_port: 7890,
                 relay_tls_port: 8943, relay_plain_port: 8945, connect_proxy_port: 8944,
                 impersonate: "safari17_0", upstream_host: "chatgpt.com",
                 remote_control: true, watch_interval_sec: 60)
@@ -114,8 +114,8 @@ struct Profile: Codable, Identifiable, Equatable {
         var p = Profile.blank(name: name)
         let json = (try? String(contentsOfFile: ProfileStore.configPath, encoding: .utf8)) ?? ""
         if let data = json.data(using: .utf8), let d = try? JSONDecoder().decode([String: JSONValue].self, from: data) {
-            if let v = d["clash_socks_host"]?.stringValue { p.clash_socks_host = v }
-            if let v = d["clash_socks_port"]?.intValue { p.clash_socks_port = v }
+            if let v = d["proxy_socks_host"]?.stringValue ?? d["clash_socks_host"]?.stringValue { p.proxy_socks_host = v }
+            if let v = d["proxy_socks_port"]?.intValue ?? d["clash_socks_port"]?.intValue { p.proxy_socks_port = v }
             if let v = d["relay_tls_port"]?.intValue { p.relay_tls_port = v }
             if let v = d["relay_plain_port"]?.intValue { p.relay_plain_port = v }
             if let v = d["connect_proxy_port"]?.intValue { p.connect_proxy_port = v }
@@ -562,8 +562,8 @@ struct ServiceCard: View {
             Button { onRestart(target) } label: {
                 Image(systemName: "arrow.clockwise.circle")
             }.buttonStyle(.borderless).help("重启该服务")
-        } else if svc.id == "clash" {
-            Image(systemName: "info.circle").foregroundStyle(.secondary).help("由 Clash Verge 提供, 请确保其运行")
+        } else if svc.id == "proxy" {
+            Image(systemName: "info.circle").foregroundStyle(.secondary).help("由你的代理环境提供 (Clash/Surge/任意 SOCKS 均可), 请确保其运行")
         } else if svc.id == "chatgpt" && !svc.isOK {
             Button { onLaunch() } label: { Image(systemName: "play.circle") }.buttonStyle(.borderless).help("带增强参数启动")
         }
@@ -666,11 +666,11 @@ struct ProfileEditor: View {
                 }
             }
             Section("上游出口") {
-                LabeledRow(label: "Clash 主机", icon: "server.rack") {
-                    TextField("", text: $profile.clash_socks_host)
+                LabeledRow(label: "代理主机", icon: "server.rack") {
+                    TextField("", text: $profile.proxy_socks_host)
                 }
-                LabeledRow(label: "Clash SOCKS 端口", icon: "globe") {
-                    PortField(value: $profile.clash_socks_port)
+                LabeledRow(label: "上游 SOCKS 端口", icon: "globe") {
+                    PortField(value: $profile.proxy_socks_port)
                 }
             }
             Section("本地服务端口") {
