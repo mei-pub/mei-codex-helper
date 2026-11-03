@@ -9,6 +9,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号 (纯数字, 如 2.2.0, 不带 v 前缀)"
+        required: true
+        default: "2.2.0"
 
 permissions:
   contents: write
@@ -23,6 +28,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve version & tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag (手动触发时)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.ver.outputs.tag }}"
+          git push origin "${{ steps.ver.outputs.tag }}"
 
       - name: Build app
         run: ./build.sh
@@ -57,7 +81,7 @@ jobs:
 
       - name: Package zip
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.ver.outputs.version }}"
           ditto -c -k --keepParent "build/$APP_NAME.app" "MeiCodexHelper-$VERSION.zip"
           echo "ZIP=MeiCodexHelper-$VERSION.zip" >> "$GITHUB_ENV"
 
@@ -67,9 +91,9 @@ jobs:
           name: MeiCodexHelper-app
           path: MeiCodexHelper-*.zip
 
-      - name: Create GitHub Release (tag 触发时)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: MeiCodexHelper-*.zip
           generate_release_notes: true
