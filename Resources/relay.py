@@ -12,6 +12,7 @@ import re
 import socket
 import ssl
 import threading
+import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from curl_cffi import requests as cr
 
@@ -36,7 +37,25 @@ CERTS = os.path.join(AS_DIR, 'certs')
 LOG = os.path.join(AS_DIR, 'logs', 'relay-access.log')
 
 LOCAL = f'127.0.0.1:{PORT}'
-SESSION = cr.Session()
+
+# curl 的 easy handle 不允许并发使用 —— 多线程下共享单个 Session 会造成
+# 堆损坏(curl_easy_reset 释放野指针, SIGABRT)。改为会话池: 请求独占借还。
+_SESSION_POOL = queue.Queue()
+
+def session_acquire():
+    try:
+        return _SESSION_POOL.get_nowait()
+    except queue.Empty:
+        return cr.Session()
+
+def session_release(s):
+    if _SESSION_POOL.qsize() < 16:
+        _SESSION_POOL.put(s)
+    else:
+        try:
+            s.close()
+        except Exception:
+            pass
 SKIP_REQ = {'host', 'connection', 'keep-alive', 'proxy-connection', 'transfer-encoding',
             'content-length', 'accept-encoding', 'upgrade'}
 SKIP_RESP = {'content-length', 'content-encoding', 'transfer-encoding', 'connection',
@@ -210,11 +229,20 @@ class Relay(BaseHTTPRequestHandler):
                 diag.append('auth=' + v[:12])
             elif lk == 'cookie':
                 diag.append('cookie=' + str(len(v)) + 'B')
+        sess = session_acquire()
         try:
-            r = SESSION.request(self.command, UP + up_path, headers=headers,
-                                data=body, proxies=PROXIES, impersonate=IMPERSONATE,
-                                allow_redirects=False, stream=True, timeout=180)
+            r = sess.request(self.command, UP + up_path, headers=headers,
+                             data=body, proxies=PROXIES, impersonate=IMPERSONATE,
+                             allow_redirects=False, stream=True, timeout=180)
         except Exception as e:
+            session_release(sess)
+            log(f'{self.command} {self.path} -> 上游异常 {type(e).__name__}: {str(e)[:80]}')
+            self.send_response(502)
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+            return
             log(f'{self.command} {self.path} -> 上游异常 {type(e).__name__}: {str(e)[:80]}')
             self.send_response(502)
             self.send_header('Content-Length', '0')
@@ -256,6 +284,7 @@ class Relay(BaseHTTPRequestHandler):
                     self.wfile.write(payload)
             except Exception:
                 pass
+            session_release(sess)
             self.close_connection = True
             return
         # 非 JSON: 流式透传(带首块诊断)
@@ -299,6 +328,7 @@ class Relay(BaseHTTPRequestHandler):
                 r.close()
             except Exception:
                 pass
+            session_release(sess)
         self.close_connection = True
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _relay
