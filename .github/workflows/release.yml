@@ -64,7 +64,17 @@ jobs:
           security unlock-keychain -p buildci "$KC"
           security import /tmp/cert.p12 -k "$KC" -P "$PWD_" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -k buildci "$KC"
-          ID=$(security find-identity -v -p codesign "$KC" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          # 导入 Apple 中间证书, 保证 Developer ID 链完整可信
+          for ca in AppleWWDRCAG4 AppleWWDRCAG6; do
+            curl -sSL -o /tmp/$ca.cer "https://www.apple.com/certificateauthority/$ca.cer" || true
+            security import /tmp/$ca.cer -k "$KC" 2>/dev/null || true
+          done
+          # 按证书哈希取身份(避开不同 macOS 版本 find-identity 参数差异)
+          ID=$(security find-identity -v "$KC" | awk '/Developer ID Application/ && /\)/ {print $2}' | head -1)
+          if [ -z "$ID" ]; then
+            echo "::warning::未找到 Developer ID 身份, find-identity 输出如下:"
+            security find-identity -v "$KC" || true
+          fi
           echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
 
       - name: Sign (auto identity or ad-hoc fallback)
