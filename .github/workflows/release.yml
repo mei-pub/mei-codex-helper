@@ -49,6 +49,8 @@ jobs:
           git push origin "${{ steps.ver.outputs.tag }}"
 
       - name: Build app
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: ./build.sh
 
       - name: Import signing certificate (optional)
