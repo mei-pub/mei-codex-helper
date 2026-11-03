@@ -38,24 +38,35 @@ LOG = os.path.join(AS_DIR, 'logs', 'relay-access.log')
 
 LOCAL = f'127.0.0.1:{PORT}'
 
-# curl 的 easy handle 不允许并发使用 —— 多线程下共享单个 Session 会造成
-# 堆损坏(curl_easy_reset 释放野指针, SIGABRT)。改为会话池: 请求独占借还。
-_SESSION_POOL = queue.Queue()
+# curl-impersonate 在多线程下不安全: 会话池(独占借还)仍出现堆损坏
+# (SIGABRT curl_easy_reset / OpenSSL RSA_sign 踩到损坏块)。
+# 终极方案: 固定 worker 线程, 每个 Session 永久绑定单一线程;
+# 处理线程提交任务并等待缓冲结果, 任何 curl 对象不跨线程。
+UPSTREAM_Q = queue.Queue()
+UPSTREAM_WORKERS = 3
 
-def session_acquire():
-    try:
-        return _SESSION_POOL.get_nowait()
-    except queue.Empty:
-        return cr.Session()
-
-def session_release(s):
-    if _SESSION_POOL.qsize() < 16:
-        _SESSION_POOL.put(s)
-    else:
+def _upstream_worker():
+    sess = cr.Session()
+    while True:
+        job = UPSTREAM_Q.get()
         try:
-            s.close()
-        except Exception:
-            pass
+            job['result'] = job['fn'](sess)
+        except Exception as e:
+            job['error'] = e
+        finally:
+            job['done'].set()
+
+def upstream_call(fn):
+    job = {'fn': fn, 'done': threading.Event()}
+    UPSTREAM_Q.put(job)
+    if not job['done'].wait(200):
+        raise OSError('upstream worker timeout')
+    if 'error' in job:
+        raise job['error']
+    return job['result']
+
+for _ in range(UPSTREAM_WORKERS):
+    threading.Thread(target=_upstream_worker, daemon=True).start()
 SKIP_REQ = {'host', 'connection', 'keep-alive', 'proxy-connection', 'transfer-encoding',
             'content-length', 'accept-encoding', 'upgrade'}
 SKIP_RESP = {'content-length', 'content-encoding', 'transfer-encoding', 'connection',
@@ -229,13 +240,14 @@ class Relay(BaseHTTPRequestHandler):
                 diag.append('auth=' + v[:12])
             elif lk == 'cookie':
                 diag.append('cookie=' + str(len(v)) + 'B')
-        sess = session_acquire()
-        try:
+        def _fetch(sess):
             r = sess.request(self.command, UP + up_path, headers=headers,
                              data=body, proxies=PROXIES, impersonate=IMPERSONATE,
-                             allow_redirects=False, stream=True, timeout=180)
+                             allow_redirects=False, timeout=180)
+            return r.status_code, list(r.headers.items()), r.content or b''
+        try:
+            status, up_headers, payload = upstream_call(_fetch)
         except Exception as e:
-            session_release(sess)
             log(f'{self.command} {self.path} -> 上游异常 {type(e).__name__}: {str(e)[:80]}')
             self.send_response(502)
             self.send_header('Content-Length', '0')
@@ -243,92 +255,32 @@ class Relay(BaseHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             return
-            log(f'{self.command} {self.path} -> 上游异常 {type(e).__name__}: {str(e)[:80]}')
-            self.send_response(502)
-            self.send_header('Content-Length', '0')
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            self.close_connection = True
-            return
-        log(f'{self.command} {self.path} -> {r.status_code} ' + ' '.join(diag))
-        ct_full = r.headers.get('content-type') or ''
+        log(f'{self.command} {self.path} -> {status} ' + ' '.join(diag))
+        ct_full = next((v for k, v in up_headers if k.lower() == 'content-type'), '')
+        # 统一缓冲响应; JSON 额外重写 websocket_url 到本地隧道
         if 'json' in ct_full.lower():
-            # JSON: 整体缓冲(iter_content拼接,勿用r.content), 把 websocket_url 重写到本地隧道
-            try:
-                chunks = []
-                for ch in r.iter_content(chunk_size=65536):
-                    if ch:
-                        chunks.append(ch)
-                payload = b''.join(chunks)
-            except Exception:
-                payload = b''
             payload = payload.replace(f'wss://ws.{UP_HOST}'.encode(),
                                       f'wss://127.0.0.1:{PORT}/_ws/ws.{UP_HOST}'.encode())
-            snip = b' '.join(payload[:100].split()).decode('utf-8', 'replace')[:80]
-            log(f'   resp {ct_full[:30]} | {snip}')
-            self.send_response(r.status_code)
-            for k, v in r.headers.items():
-                lk = k.lower()
-                if lk in SKIP_RESP or lk == 'content-length':
-                    continue
-                if lk == 'set-cookie':
-                    v = re.sub(rf'[Dd]omain=\.?{re.escape(UP_HOST)};?\s*', '', v)
-                elif lk == 'location':
-                    v = v.replace(f'https://{UP_HOST}', f'http://{LOCAL}')
-                self.send_header(k, v)
-            self.send_header('Content-Length', str(len(payload)))
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            try:
-                if self.command != 'HEAD':
-                    self.wfile.write(payload)
-            except Exception:
-                pass
-            session_release(sess)
-            self.close_connection = True
-            return
-        # 非 JSON: 流式透传(带首块诊断)
-        try:
-            ct = ct_full[:30]
-            first = b''
-            it = r.iter_content(chunk_size=256)
-            try:
-                first = next(it) or b''
-            except StopIteration:
-                it = None
-            except Exception:
-                it = None
-            snip = b' '.join(first[:100].split()).decode('utf-8', 'replace')[:80]
-            log(f'   resp {ct} | {snip}')
-        except Exception:
-            first, it = b'', None
-        self.send_response(r.status_code)
-        for k, v in r.headers.items():
+        snip = b' '.join(payload[:100].split()).decode('utf-8', 'replace')[:80]
+        log(f'   resp {ct_full[:30]} | {snip}')
+        self.send_response(status)
+        for k, v in up_headers:
             lk = k.lower()
-            if lk in SKIP_RESP:
+            if lk in SKIP_RESP or lk == 'content-length':
                 continue
             if lk == 'set-cookie':
                 v = re.sub(rf'[Dd]omain=\.?{re.escape(UP_HOST)};?\s*', '', v)
             elif lk == 'location':
                 v = v.replace(f'https://{UP_HOST}', f'http://{LOCAL}')
             self.send_header(k, v)
+        self.send_header('Content-Length', str(len(payload)))
         self.send_header('Connection', 'close')
         self.end_headers()
         try:
-            if first:
-                self.wfile.write(first)
-            if it is not None:
-                for chunk in it:
-                    if chunk:
-                        self.wfile.write(chunk)
+            if self.command != 'HEAD':
+                self.wfile.write(payload)
         except Exception:
             pass
-        finally:
-            try:
-                r.close()
-            except Exception:
-                pass
-            session_release(sess)
         self.close_connection = True
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _relay
