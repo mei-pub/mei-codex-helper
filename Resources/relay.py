@@ -45,6 +45,30 @@ LOCAL = f'127.0.0.1:{PORT}'
 UPSTREAM_Q = queue.Queue()
 UPSTREAM_WORKERS = 3
 
+# 熔断器: 防止 OpenAI 客户端无退避重试风暴打爆账号风控
+# 同一路径连续 CB_THRESHOLD 次 401/403 -> 冷却 CB_COOLDOWN 秒, 期间本地直接 429
+_CB_LOCK = threading.Lock()
+_CB = {}          # path -> [连续失败次数, 熔断到期时间戳]
+_CB_THRESHOLD = 5
+_CB_COOLDOWN = 120
+
+def _cb_blocked(path):
+    with _CB_LOCK:
+        st = _CB.get(path.split('?')[0])
+        return bool(st and st[1] > time.time())
+
+def _cb_record(path, status):
+    key = path.split('?')[0]
+    with _CB_LOCK:
+        st = _CB.setdefault(key, [0, 0.0])
+        if status in (401, 403):
+            st[0] += 1
+            if st[0] >= _CB_THRESHOLD:
+                st[1] = time.time() + _CB_COOLDOWN
+                log(f'熔断开启: {key} 连续{st[0]}次{status}, 冷却{_CB_COOLDOWN}s')
+        elif status < 400:
+            st[0] = 0
+
 def _upstream_worker():
     sess = cr.Session()
     while True:
@@ -226,6 +250,14 @@ class Relay(BaseHTTPRequestHandler):
     def _relay(self):
         if 'websocket' in (self.headers.get('Upgrade') or '').lower():
             return self._ws_tunnel()
+        if _cb_blocked(self.path):
+            self.send_response(429)
+            self.send_header('Retry-After', '60')
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+            return
         body = self._read_body()
         up_path = map_path(self.path)
         headers = {}
@@ -256,6 +288,7 @@ class Relay(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         log(f'{self.command} {self.path} -> {status} ' + ' '.join(diag))
+        _cb_record(self.path, status)
         ct_full = next((v for k, v in up_headers if k.lower() == 'content-type'), '')
         # 统一缓冲响应; JSON 额外重写 websocket_url 到本地隧道
         if 'json' in ct_full.lower():
