@@ -47,6 +47,11 @@ def gen(force=False):
                                             key_encipherment=False, data_encipherment=False,
                                             key_agreement=False, encipher_only=False,
                                             decipher_only=False), critical=True)
+               # SKI/AKI: rustls(codex) 等严格校验端要求证书链具备密钥标识链接
+               .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                              critical=False)
+               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+                              critical=False)
                .sign(ca_key, hashes.SHA256()))
 
     # Leaf (SAN: localhost + 127.0.0.1)
@@ -64,9 +69,13 @@ def gen(force=False):
                                               key_encipherment=True, data_encipherment=False,
                                               key_agreement=False, encipher_only=False,
                                               decipher_only=False), critical=True)
-                 .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
-                                critical=False)
-                 .add_extension(x509.SubjectAlternativeName([
+               .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+                              critical=False)
+               .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf_key.public_key()),
+                              critical=False)
+               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+                              critical=False)
+               .add_extension(x509.SubjectAlternativeName([
                      x509.DNSName('localhost'), x509.IPAddress(ipaddress_module().IPv4Address('127.0.0.1'))]),
                      critical=False)
                  .sign(ca_key, hashes.SHA256()))
