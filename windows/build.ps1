@@ -1,4 +1,4 @@
-# MeiCodexHelper Windows 构建脚本 (PyInstaller 多产物打包)
+﻿# MeiCodexHelper Windows 构建脚本 (PyInstaller 多产物打包)
 # 用法: powershell -ExecutionPolicy Bypass -File build.ps1 [输出版本]
 param([string]$Version = "0.0.0-dev")
 $ErrorActionPreference = "Stop"

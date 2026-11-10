@@ -1,4 +1,4 @@
-# MeiCodexHelper Windows 引擎 (平台层)
+﻿# MeiCodexHelper Windows 引擎 (平台层)
 # 用法: powershell -ExecutionPolicy Bypass -File engine.ps1 <install|status|launch-chatgpt|open-logs|open-config|uninstall --yes>
 param(
     [Parameter(Position = 0)][string]$Command = "status",
