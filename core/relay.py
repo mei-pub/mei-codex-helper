@@ -104,7 +104,7 @@ SKIP_RESP = {'content-length', 'content-encoding', 'transfer-encoding', 'connect
 def log(m):
     try:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
-        with open(LOG, 'a') as f:
+        with open(LOG, 'a', encoding='utf-8') as f:
             f.write(time.strftime('%H:%M:%S ') + m + '\n')
     except OSError:
         pass
@@ -337,6 +337,14 @@ def start_servers():
         try:
             ts = ctx.wrap_socket(sock, server_side=True)
             return ts
+        except (ssl.SSLEOFError, ConnectionAbortedError, ConnectionResetError):
+            # 客户端单方面断开(握手即断/abort/reset): 探活探测、扫描器或客户端放弃,
+            # 非服务端问题, 不记录
+            try:
+                sock.close()
+            except OSError:
+                pass
+            return None
         except (ssl.SSLError, OSError) as e:
             log(f'TLS握手失败 from {addr[0]}:{addr[1]}: {type(e).__name__} {str(e)[:80]}')
             try:

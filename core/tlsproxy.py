@@ -29,7 +29,7 @@ LISTEN = ('127.0.0.1', LISTEN_PORT)
 def log(m):
     try:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
-        with open(LOG, 'a') as f:
+        with open(LOG, 'a', encoding='utf-8') as f:
             f.write(time.strftime('%H:%M:%S ') + m + '\n')
     except OSError:
         pass

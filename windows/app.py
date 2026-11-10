@@ -96,12 +96,14 @@ class ServiceHost:
                     pass
                 self.proxy_sock = None
 
-    def heal_if_dead(self):
-        """看门狗: 端口失活则重启线程(配置未变时)。"""
+    def heal_if_dead(self, status=None):
+        """看门狗: 端口失活则重启线程(配置未变时)。传入巡检结果可避免重复探测。"""
         try:
-            cfg = paths.load_config()
-            need = not ec._port_listening(cfg['relay_tls_port']) or not ec._port_listening(cfg['connect_proxy_port'])
-            if need:
+            if status is None:
+                cfg = paths.load_config()
+                status = ec.collect_status()
+            ok = {s['id']: s['state'] == 'ok' for s in status}
+            if not ok.get('relay') or not ok.get('connect'):
                 self.stop(); time.sleep(0.5); self.start()
         except Exception:
             pass
@@ -379,8 +381,8 @@ class App:
         def work():
             while True:
                 try:
-                    self.host.heal_if_dead()
                     self.status = ec.collect_status()
+                    self.host.heal_if_dead(self.status)
                     ok = sum(1 for x in self.status if x['state'] == 'ok')
                     self.root.after(0, lambda: self._render(f'{ok}/{len(self.status)} 正常'))
                     self.root.after(0, self.refresh_log)
