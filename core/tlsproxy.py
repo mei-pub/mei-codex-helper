@@ -131,15 +131,27 @@ def handle(conn):
             pass
 
 
-def main():
+def start_listener():
+    """创建监听 socket (CLI main 与宿主 GUI 线程共用); 关闭 socket 即停止服务。"""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(LISTEN)
     srv.listen(128)
     log(f'tls-adaptive connect proxy on {LISTEN} via socks5 {SOCKS}')
+    return srv
+
+
+def accept_loop(srv):
     while True:
-        c, _ = srv.accept()
+        try:
+            c, _ = srv.accept()
+        except OSError:
+            return  # listener 关闭
         threading.Thread(target=handle, args=(c,), daemon=True).start()
+
+
+def main():
+    accept_loop(start_listener())
 
 
 if __name__ == '__main__':

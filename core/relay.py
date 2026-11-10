@@ -326,7 +326,9 @@ class Relay(BaseHTTPRequestHandler):
         pass
 
 
-def main():
+def start_servers():
+    """构建 TLS + 明文双监听服务 (CLI main 与宿主进程 GUI 线程共用)。
+    返回 (tls_srv, plain_srv); 由调用方决定 serve_forever 的宿主线程与 shutdown 时机。"""
     srv = ThreadingHTTPServer(('127.0.0.1', PORT), Relay)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(os.path.join(CERTS, 'cert.pem'), os.path.join(CERTS, 'key.pem'))
@@ -365,9 +367,13 @@ def main():
 
     # 明文监听(供不支持本地CA的 rust transport 用 ws://)
     srv2 = ThreadingHTTPServer(('127.0.0.1', PLAIN_PORT), Relay)
-    threading.Thread(target=srv2.serve_forever, daemon=True).start()
-
     log(f'relay TLS :{PORT} + plain :{PLAIN_PORT} -> {UP} via socks5 {SOCKS} ({IMPERSONATE})')
+    return srv, srv2
+
+
+def main():
+    srv, srv2 = start_servers()
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
     srv.serve_forever()
 
 

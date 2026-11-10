@@ -103,13 +103,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Build (PyInstaller x4)
-        shell: powershell
-        run: ./windows/build.ps1 -Version $env:VERSION
+      - name: Build single-file exe (PyInstaller)
+        run: python windows/build.py ${{ needs.prepare.outputs.version }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-zip
           path: windows/dist/MeiCodexHelper-*-windows.zip
+          if-no-files-found: error
 
   release:
     needs: [prepare, build-macos, build-windows]
