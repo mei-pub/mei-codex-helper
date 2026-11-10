@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import tkinter.simpledialog as sd
 
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -256,13 +256,16 @@ def find_chatgpt():
 
 
 def launch_chatgpt():
+    cfg = paths.load_config()
+    configured = cfg.get('chatgpt_path', '')
+    if configured and not os.path.exists(configured):
+        return f'配置的 ChatGPT 路径不存在: {configured} (请在 设置 里重新选择)'
     exe = find_chatgpt()
     if not exe:
-        return '未找到 ChatGPT.exe (可在 config.json 配 chatgpt_path)'
-    if ec._proc_running('ChatGPT.exe'):
+        return '未找到 ChatGPT.exe (请在 设置 → ChatGPT 路径 手动选择)'
+    if ec._proc_running(os.path.basename(exe)):
         subprocess.Popen([exe])
-        return 'ChatGPT 已在运行 (需代理参数请先退出再冷启动)'
-    cfg = paths.load_config()
+        return f'ChatGPT 已在运行 (需增强参数请先退出再启动)\n  路径: {exe}'
     cp = f"http://127.0.0.1:{cfg['connect_proxy_port']}"
     socks = f"socks5://{cfg['proxy_socks_host']}:{cfg['proxy_socks_port']}"
     ca = os.path.join(paths.CERTS_DIR, 'ca.pem')
@@ -272,7 +275,7 @@ def launch_chatgpt():
                 'SSL_CERT_FILE': ca, 'CODEX_CA_CERTIFICATE': ca, 'NODE_EXTRA_CA_CERTS': ca,
                 'WS_PROXY': cp, 'WSS_PROXY': cp})
     subprocess.Popen([exe, f'--proxy-server={socks}'], env=env)
-    return 'ChatGPT 已带增强参数冷启动'
+    return f'ChatGPT 已带增强参数冷启动\n  路径: {exe}'
 
 
 # ============================================================ GUI
@@ -287,6 +290,10 @@ class App:
         self.status = []
         self.log_src = tk.StringVar(value='relay')
         self.profiles, self.active, self.draft, self.var = [], '', {}, {}
+        self.nb = None
+        self.tab_settings = None
+        self.tray = None
+        self._tray_sig = ''
         self._build()
         self._loop()
         self.root.protocol('WM_DELETE_WINDOW', self.root.withdraw)
@@ -294,6 +301,7 @@ class App:
     def _build(self):
         nb = ttk.Notebook(self.root)
         nb.pack(fill='both', expand=True)
+        self.nb = nb
         # ---- 控制台 ----
         f = ttk.Frame(nb, padding=10); nb.add(f, text=' 控制台 ')
         head = ttk.Frame(f); head.pack(fill='x')
@@ -320,6 +328,7 @@ class App:
         self.logw.pack(fill='both', expand=True)
         # ---- 设置 ----
         s = ttk.Frame(nb, padding=10); nb.add(s, text=' 设置 ')
+        self.tab_settings = s
         main = ttk.Frame(s); main.pack(fill='both', expand=True)
         left = ttk.LabelFrame(main, text=' 配置方案 ', padding=6)
         left.pack(side='left', fill='y', padx=(0, 8))
@@ -345,6 +354,13 @@ class App:
             ttk.Entry(self.form, textvariable=v, width=14 if kind == 'int' else 24).grid(row=i, column=1, sticky='w')
             self.var[key] = (v, kind)
         r = len(FIELDS)
+        ttk.Label(self.form, text='ChatGPT 路径', width=16).grid(row=r, column=0, sticky='e', padx=4, pady=4)
+        gp_fr = ttk.Frame(self.form); gp_fr.grid(row=r, column=1, sticky='w')
+        gp = tk.StringVar(value=str(cfg.get('chatgpt_path', '')))
+        ttk.Entry(gp_fr, textvariable=gp, width=36).pack(side='left')
+        ttk.Button(gp_fr, text='浏览…', width=6, command=self.b_pick_chatgpt).pack(side='left', padx=4)
+        self.var['chatgpt_path'] = (gp, 'str')
+        r += 1
         ttk.Label(self.form, text='TLS 指纹', width=16).grid(row=r, column=0, sticky='e', padx=4, pady=4)
         imp = tk.StringVar(value=cfg.get('impersonate', 'safari17_0'))
         ttk.Combobox(self.form, textvariable=imp, values=IMPERSONATES, state='readonly', width=14).grid(row=r, column=1, sticky='w')
@@ -358,7 +374,7 @@ class App:
         ttk.Entry(self.form, textvariable=wi, width=8).grid(row=r + 2, column=1, sticky='w')
         self.var['watch_interval_sec'] = (wi, 'int')
 
-    # ---- 后台循环: 状态 + 看门狗 + 日志 ----
+    # ---- 后台循环: 状态 + 看门狗 + 日志 + 托盘刷新 ----
     def _loop(self):
         def work():
             while True:
@@ -368,6 +384,7 @@ class App:
                     ok = sum(1 for x in self.status if x['state'] == 'ok')
                     self.root.after(0, lambda: self._render(f'{ok}/{len(self.status)} 正常'))
                     self.root.after(0, self.refresh_log)
+                    self.refresh_tray()
                 except Exception:
                     pass
                 time.sleep(5)
@@ -391,38 +408,55 @@ class App:
 
     # ---- 动作 ----
     def a_launch(self):
-        threading.Thread(target=lambda: launch_chatgpt(), daemon=True).start()
+        def work():
+            msg = launch_chatgpt()
+            self.root.after(0, lambda: self._append('[ChatGPT]\n' + msg + '\n'))
+            if '未找到' in msg or '不存在' in msg:
+                self.root.after(0, self._offer_pick_and_launch)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pick_chatgpt_path(self):
+        init = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs')
+        p = filedialog.askopenfilename(
+            parent=self.root, title='选择 ChatGPT 程序 (ChatGPT.exe)',
+            initialdir=init if os.path.isdir(init) else '/',
+            filetypes=[('ChatGPT', 'ChatGPT.exe'), ('可执行文件', '*.exe')])
+        return p or None
+
+    @staticmethod
+    def _set_chatgpt_path(p):
+        cfg = paths.load_config()
+        cfg['chatgpt_path'] = p
+        json.dump(cfg, open(paths.CFG_PATH, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+
+    def b_pick_chatgpt(self):
+        p = self.pick_chatgpt_path()
+        if not p:
+            return
+        self._set_chatgpt_path(p)  # 立即写入 config.json 即刻生效 (保存配置时也会随表单持久化)
+        if 'chatgpt_path' in self.var:
+            self.var['chatgpt_path'][0].set(p)
+        self._append(f'[ChatGPT] 路径已保存: {p}\n')
+
+    def _offer_pick_and_launch(self):
+        if messagebox.askyesno('启动 ChatGPT',
+                               '未找到 ChatGPT.exe。\n是否手动选择程序位置?', parent=self.root):
+            p = self.pick_chatgpt_path()
+            if p:
+                self._set_chatgpt_path(p)
+                if 'chatgpt_path' in self.var:
+                    self.var['chatgpt_path'][0].set(p)
+                self._append(f'[ChatGPT] 路径已保存: {p}, 重新启动…\n')
+                self.a_launch()
 
     def a_restart(self):
-        threading.Thread(target=self.host.restart_with_new_config, daemon=True).start()
+        self.t_restart()
 
     def a_install(self):
-        def work():
-            msg = Installer.install()
-            self._append('[安装/修复]\n' + msg + '\n')
-        threading.Thread(target=work, daemon=True).start()
+        self.t_install()
 
     def a_doctor(self):
-        def work():
-            lines = ['== 诊断 ==']
-            for st in ec.collect_status():
-                lines.append(f"{st['name']}: {'正常' if st['state'] == 'ok' else '停止'}")
-            cfg = paths.load_config()
-            import ssl as ssl_mod
-            import urllib.request as ur
-            try:
-                ctx = ssl_mod.create_default_context()
-                ctx.load_verify_locations(os.path.join(paths.CERTS_DIR, 'ca.pem'))
-                r = ur.urlopen(ur.Request(
-                    f"https://127.0.0.1:{cfg['relay_tls_port']}/api/codex/accounts/check"),
-                    timeout=6, context=ctx)
-                lines.append(f'Relay HTTPS 自检: HTTP {r.status}')
-            except ur.error.HTTPError as e:
-                lines.append(f'Relay HTTPS 自检: HTTP {e.code} (401/403=链路通)')
-            except Exception as e:
-                lines.append(f'Relay HTTPS 自检: 失败 {e}')
-            self._append('\n'.join(lines) + '\n')
-        threading.Thread(target=work, daemon=True).start()
+        self.t_doctor()
 
     def a_uninstall(self):
         if messagebox.askyesno('卸载', '卸载将还原 .codex 配置、移除自启与证书信任。继续?'):
@@ -450,6 +484,104 @@ class App:
         self.logw.insert('end', text + '\n')
         self.logw.see('end')
         self.logw.configure(state='disabled')
+
+    # ---- 托盘 (对齐 macOS 菜单栏面板: 状态总览 + 各服务状态 + 全套操作) ----
+    def _tray_menu(self):
+        from pystray import Menu, MenuItem
+        SEP = Menu.SEPARATOR
+        ok = sum(1 for s in self.status if s['state'] == 'ok')
+        head = (f'MeiCodexHelper · {ok}/{len(self.status)} 正常' if self.status
+                else 'MeiCodexHelper · 加载中…')
+        items = [MenuItem(head, None, enabled=False)]
+        if self.status:
+            items.append(SEP)
+            items += [MenuItem(('● ' if s['state'] == 'ok' else '○ ') + s['name'], None,
+                               enabled=False) for s in self.status]
+        items += [
+            SEP,
+            MenuItem('打开主窗口', lambda *_: self.t_open(), default=True),
+            MenuItem('设置…', lambda *_: self.t_settings()),
+            MenuItem('启动 ChatGPT (增强)', lambda *_: self.a_launch()),
+            MenuItem('重启服务', lambda *_: self.t_restart()),
+            SEP,
+            MenuItem('安装 / 修复', lambda *_: self.t_install()),
+            MenuItem('诊断', lambda *_: self.t_doctor()),
+            MenuItem('日志文件夹', lambda *_: self.a_logs()),
+            MenuItem('卸载…', lambda *_: self.t_uninstall()),
+            SEP,
+            MenuItem('退出', lambda *_: self.t_quit()),
+        ]
+        return Menu(*items)
+
+    def refresh_tray(self):
+        """状态变化时重建托盘菜单与悬浮提示 (由 _loop 后台线程调用)。"""
+        tray = self.tray
+        if tray is None:
+            return
+        try:
+            sig = ';'.join(f"{s['id']}:{s['state']}" for s in self.status)
+            if sig != self._tray_sig:
+                self._tray_sig = sig
+                tray.menu = self._tray_menu()
+            ok = sum(1 for s in self.status if s['state'] == 'ok')
+            title = f'MeiCodexHelper · {ok}/{len(self.status)} 正常' if self.status else 'MeiCodexHelper'
+            if tray.title != title:
+                tray.title = title
+        except Exception:
+            pass
+
+    def no_tray(self):
+        """托盘不可用时退化: 关窗即退出, 避免应用成幽灵进程。"""
+        self.tray = None
+        self.root.protocol('WM_DELETE_WINDOW', self.root.destroy)
+
+    # 托盘回调运行在 pystray 线程, 所有 UI 操作经 root.after 派发到主线程
+    def t_open(self):
+        self.root.after(0, lambda: (self.root.deiconify(), self.root.lift(), self.root.focus_force()))
+
+    def t_settings(self):
+        def go():
+            if self.nb is not None and self.tab_settings is not None:
+                self.nb.select(self.tab_settings)
+            self.root.deiconify(); self.root.lift(); self.root.focus_force()
+        self.root.after(0, go)
+
+    def t_restart(self):
+        threading.Thread(target=self.host.restart_with_new_config, daemon=True).start()
+
+    def t_install(self):
+        def work():
+            msg = Installer.install()
+            self.root.after(0, lambda: self._append('[安装/修复]\n' + msg + '\n'))
+        threading.Thread(target=work, daemon=True).start()
+
+    def t_doctor(self):
+        def work():
+            lines = ['== 诊断 ==']
+            for st in ec.collect_status():
+                lines.append(f"{st['name']}: {'正常' if st['state'] == 'ok' else '停止'}")
+            cfg = paths.load_config()
+            import ssl as ssl_mod
+            import urllib.request as ur
+            try:
+                ctx = ssl_mod.create_default_context()
+                ctx.load_verify_locations(os.path.join(paths.CERTS_DIR, 'ca.pem'))
+                r = ur.urlopen(ur.Request(
+                    f"https://127.0.0.1:{cfg['relay_tls_port']}/api/codex/accounts/check"),
+                    timeout=6, context=ctx)
+                lines.append(f'Relay HTTPS 自检: HTTP {r.status}')
+            except ur.error.HTTPError as e:
+                lines.append(f'Relay HTTPS 自检: HTTP {e.code} (401/403=链路通)')
+            except Exception as e:
+                lines.append(f'Relay HTTPS 自检: 失败 {e}')
+            self.root.after(0, lambda: self._append('\n'.join(lines) + '\n'))
+        threading.Thread(target=work, daemon=True).start()
+
+    def t_uninstall(self):
+        self.root.after(0, self.a_uninstall)
+
+    def t_quit(self):
+        self.root.after(0, self.root.destroy)
 
     # ---- 配置方案 ----
     def reload_profiles(self):
@@ -579,25 +711,15 @@ def main():
         threading.Thread(target=lambda: app._append('[首次运行]\n' + Installer.install() + '\n'),
                          daemon=True).start()
     try:
-        from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem
+        from pystray import Icon as TrayIcon
         from PIL import Image
         img_path = _asset('tray.png')
         image = Image.open(img_path) if os.path.exists(img_path) else Image.new('RGB', (64, 64), '#5233EA')
-
-        def tray_launch():
-            threading.Thread(target=launch_chatgpt, daemon=True).start()
-
-        tray = TrayIcon('MeiCodexHelper', image, 'MeiCodexHelper',
-                        TrayMenu(MenuItem('打开主窗口', lambda: app.root.after(0, app.root.deiconify), default=True),
-                                 TrayMenu.SEPARATOR,
-                                 MenuItem('启动 ChatGPT (增强)', tray_launch),
-                                 MenuItem('重启增强服务', lambda: threading.Thread(
-                                     target=host.restart_with_new_config, daemon=True).start()),
-                                 TrayMenu.SEPARATOR,
-                                 MenuItem('退出', lambda: app.root.after(0, app.root.destroy))))
-        threading.Thread(target=tray.run, daemon=True).start()
-    except ImportError:
-        pass
+        app.tray = TrayIcon('MeiCodexHelper', image, 'MeiCodexHelper', app._tray_menu())
+        threading.Thread(target=app.tray.run, daemon=True).start()
+    except Exception as e:
+        app.no_tray()  # 无托盘时关窗即退出, 否则应用无法再次唤出
+        app.root.after(0, lambda: app._append(f'[托盘] 初始化失败 ({e}), 已退化为关窗即退出\n'))
     app.root.mainloop()
 
 

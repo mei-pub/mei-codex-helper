@@ -75,8 +75,9 @@ windows/            Windows 平台层 (Preview)
 ### Windows (Preview)
 1. 从 Release 下载 `MeiCodexHelper-<版本>-windows.zip` 并解压
 2. 双击 `MeiCodexHelper.exe` —— **仅此一步**：首次运行自动完成安装（生成并信任证书、接入 `~/.codex`、注册开机自启、启动全部服务），随后常驻系统托盘
-3. 托盘菜单 → 「启动 ChatGPT (增强)」；主窗口提供控制台/设置双 Tab（多配置方案管理与 macOS 版一致）
-4. 卸载：控制台 → 「卸载…」（还原 `~/.codex` 配置备份、移除自启与证书信任）
+3. 托盘菜单提供状态总览与全套操作（启动 ChatGPT/重启服务/诊断/日志/安装·修复/卸载/退出，与 macOS 菜单栏同构）；主窗口提供控制台/设置双 Tab（多配置方案管理与 macOS 版一致）
+4. 找不到 ChatGPT.exe 时会引导选择程序位置（也可在 设置 → ChatGPT 路径 手动指定，路径存入 `chatgpt_path`）
+5. 卸载：控制台 → 「卸载…」（还原 `~/.codex` 配置备份、移除自启与证书信任）
 
 > Windows 版为**单文件 exe**：GUI 与全部内核服务（中继/CONNECT 代理/看门狗）同进程线程化运行，无需安装 Python 或任何脚本。CA 证书装入当前用户根存储（无需管理员）；自启动通过当前用户注册表 Run 键。
 

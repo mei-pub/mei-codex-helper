@@ -17,6 +17,7 @@ import paths  # noqa: E402
 
 IS_WIN = sys.platform == 'win32'
 PY_EXEC = sys.executable
+_NO_WINDOW = 0x08000000 if IS_WIN else 0  # CREATE_NO_WINDOW: GUI 内调命令行工具不闪控制台
 
 
 # ---------- 进程托管 (无平台托管时的兜底; Windows 主路径) ----------
@@ -98,13 +99,40 @@ def _socks_functional(host, port):
         return False
 
 
+def _win_cmdline_grep(pattern):
+    """命令行子串查进程 (wmic 不可用时经 PowerShell CIM)。pattern 含空格=命令行特征。"""
+    try:
+        out = subprocess.run(['wmic', 'process', 'get', 'commandline'],
+                             capture_output=True, text=True, timeout=10, errors='replace',
+                             creationflags=_NO_WINDOW).stdout or ''
+        return pattern.lower() in out.lower()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass  # Win11 24H2+ 已移除 wmic
+    word = pattern.strip().split()[0].replace("'", "").replace('"', '')
+    cmd = (f"Get-CimInstance Win32_Process -Filter \"CommandLine LIKE '%{word}%'\" "
+           '| Select-Object -ExpandProperty CommandLine')
+    try:
+        out = subprocess.run(['powershell.exe', '-NoProfile', '-Command', cmd],
+                             capture_output=True, text=True, timeout=15, errors='replace',
+                             creationflags=_NO_WINDOW).stdout or ''
+        return pattern.lower() in out.lower()
+    except Exception:
+        return False
+
+
 def _proc_running(pattern):
-    """按命令行特征查进程(跨平台)"""
+    """按命令行/进程名查进程(跨平台)"""
     try:
         if IS_WIN:
-            out = subprocess.run(['wmic', 'process', 'get', 'commandline'],
-                                 capture_output=True, text=True, timeout=10).stdout or ''
-            return pattern.lower() in out.lower()
+            if ' ' in pattern.strip():
+                return _win_cmdline_grep(pattern)
+            name = pattern.strip()
+            if not name.lower().endswith('.exe'):
+                name += '.exe'
+            out = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {name}', '/FO', 'CSV'],
+                                 capture_output=True, text=True, timeout=10, errors='replace',
+                                 creationflags=_NO_WINDOW).stdout or ''
+            return name.lower() in out.lower()
         out = subprocess.run(['ps', '-axo', 'command'], capture_output=True, text=True, timeout=10).stdout or ''
         return pattern in out
     except Exception:

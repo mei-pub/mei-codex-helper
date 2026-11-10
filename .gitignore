@@ -5,3 +5,4 @@ build/
 dist/
 *.spec
 windows/assets/
+__pycache__/
