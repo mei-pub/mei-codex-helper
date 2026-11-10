@@ -53,13 +53,23 @@ ico.resize((64, 64)).save('assets/tray.png')
 print('icons ok')
 
 # 单文件 exe: GUI + 内核(core 以数据打包, 运行时 _MEIPASS/core 导入)
+# core/*.py 不参与 PyInstaller 静态分析, 其依赖 (含 http.server 等按需打包的标准库) 须逐一声明
 sep = ';' if os.name == 'nt' else ':'
-run([sys.executable, '-m', 'PyInstaller', '--onefile', '--windowed', '--noconfirm', '--clean',
-     '--name', 'MeiCodexHelper', '--icon', 'assets/icon.ico',
-     f'--add-data', f'..{os.sep}core{sep}core',
-     f'--add-data', f'assets{sep}assets',
-     '--hidden-import', 'curl_cffi',
-     'app.py'])
+hidden = [
+    'curl_cffi',
+    'cryptography', 'cryptography.x509',
+    'cryptography.hazmat.primitives.hashes',
+    'cryptography.hazmat.primitives.serialization',
+    'cryptography.hazmat.primitives.asymmetric.rsa',
+    'http.server', 'queue', 'datetime', 'ipaddress',
+]
+cmd = [sys.executable, '-m', 'PyInstaller', '--onefile', '--windowed', '--noconfirm', '--clean',
+       '--name', 'MeiCodexHelper', '--icon', 'assets/icon.ico',
+       f'--add-data', f'..{os.sep}core{sep}core',
+       f'--add-data', f'assets{sep}assets']
+for m in hidden:
+    cmd += ['--hidden-import', m]
+run(cmd + ['app.py'])
 
 # 分发包: 单 exe + README
 zipname = f'dist/MeiCodexHelper-{VERSION}-windows.zip'

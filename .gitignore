@@ -2,3 +2,6 @@
 *.zip
 .DS_Store
 build/
+dist/
+*.spec
+windows/assets/
