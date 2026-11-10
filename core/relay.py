@@ -17,7 +17,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from curl_cffi import requests as cr
 
 # ---------- 配置 ----------
-AS_DIR = os.path.expanduser('~/Library/Application Support/MeiCodexHelper')
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths  # noqa: E402  (core 层共享路径模块)
+
+AS_DIR = paths.AS_DIR
 CFG_PATH = os.path.join(AS_DIR, 'config.json')
 try:
     _c = json.load(open(CFG_PATH))

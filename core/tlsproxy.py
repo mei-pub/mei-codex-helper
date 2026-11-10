@@ -5,7 +5,11 @@
 CONNECT 上游经 SOCKS5 隧道到目标; 回环目标直连。参数见 config.json。"""
 import socket, ssl, threading, json, os, time
 
-AS_DIR = os.path.expanduser('~/Library/Application Support/MeiCodexHelper')
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths  # noqa: E402  (core 层共享路径模块)
+
+AS_DIR = paths.AS_DIR
 try:
     _c = json.load(open(os.path.join(AS_DIR, 'config.json')))
 except Exception:

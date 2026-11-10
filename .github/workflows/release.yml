@@ -1,36 +1,29 @@
 name: Release Build
 
-# 触发: 推送 v* 标签 或 手动运行
-# 签名仅需 2 个 Secrets (均可空, 空则 ad-hoc 签名):
-#   MACOS_CERT_P12_BASE64    — Developer ID 证书 .p12 的 base64
-#   MACOS_CERT_P12_PASSWORD  — .p12 导出密码
-# 签名身份自动从证书中提取, 无需单独配置
+# 触发: 推送 v* 标签 或 手动指定版本
+# 签名(macOS)仅需 2 个 Secrets (均可空, 空则 ad-hoc):
+#   MACOS_CERT_P12_BASE64 / MACOS_CERT_P12_PASSWORD (身份自动从证书提取)
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号 (纯数字, 如 2.2.0, 不带 v 前缀)"
+        description: "版本号 (纯数字, 不带 v 前缀)"
         required: true
-        default: "2.2.0"
+        default: "0.1.0"
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-15
-    env:
-      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-      MACOS_CERT_P12_PASSWORD: ${{ secrets.MACOS_CERT_P12_PASSWORD }}
-      APP_NAME: MeiCodexHelper
-
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve version & tag
-        id: ver
+      - id: ver
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
@@ -40,19 +33,25 @@ jobs:
             echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
+  build-macos:
+    needs: prepare
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_P12_PASSWORD: ${{ secrets.MACOS_CERT_P12_PASSWORD }}
+      APP_NAME: MeiCodexHelper
+    steps:
+      - uses: actions/checkout@v4
       - name: Create tag (手动触发时)
         if: github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.ver.outputs.tag }}"
-          git push origin "${{ steps.ver.outputs.tag }}"
-
+          git tag "${{ needs.prepare.outputs.tag }}"
+          git push origin "${{ needs.prepare.outputs.tag }}"
       - name: Build app
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: ./build.sh
-
+        run: cd mac && ./build.sh
       - name: Import signing certificate (optional)
         if: env.MACOS_CERT_P12_BASE64 != ''
         env:
@@ -66,49 +65,68 @@ jobs:
           security unlock-keychain -p buildci "$KC"
           security import /tmp/cert.p12 -k "$KC" -P "$PWD_" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -k buildci "$KC"
-          # 导入 Apple 中间证书, 保证 Developer ID 链完整可信
           for ca in AppleWWDRCAG4 AppleWWDRCAG6; do
             curl -sSL -o /tmp/$ca.cer "https://www.apple.com/certificateauthority/$ca.cer" || true
             security import /tmp/$ca.cer -k "$KC" 2>/dev/null || true
           done
-          # 按证书哈希取身份(避开不同 macOS 版本 find-identity 参数差异)
           ID=$(security find-identity -v "$KC" | awk '/Developer ID Application/ && /\)/ {print $2}' | head -1)
-          if [ -z "$ID" ]; then
-            echo "::warning::未找到 Developer ID 身份, find-identity 输出如下:"
-            security find-identity -v "$KC" || true
-          fi
           echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
-
       - name: Sign (auto identity or ad-hoc fallback)
         run: |
           if [ -n "${SIGN_IDENTITY:-}" ]; then
             echo "使用身份签名: $SIGN_IDENTITY"
             codesign --force --options runtime --timestamp \
-              --sign "$SIGN_IDENTITY" "build/$APP_NAME.app"
+              --sign "$SIGN_IDENTITY" "mac/build/$APP_NAME.app"
           else
             echo "未配置证书, 使用 ad-hoc 签名"
-            codesign --force -s - --deep "build/$APP_NAME.app"
+            codesign --force -s - --deep "mac/build/$APP_NAME.app"
           fi
-          codesign --verify --strict "build/$APP_NAME.app" && echo "签名校验通过"
-
+          codesign --verify --strict "mac/build/$APP_NAME.app" && echo "签名校验通过"
       - name: Package dmg
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-          # 创建带拖拽安装布局的 DMG (背景: Applications 文件夹快捷方式)
-          DMG="MeiCodexHelper-$VERSION.dmg"
-          hdiutil create -volname "$APP_NAME"             -srcfolder "build/$APP_NAME.app"             -ov -format UDZO "$DMG"
-          # 校验 dmg 可挂载
-          hdiutil verify "$DMG" >/dev/null && echo "DMG 校验通过"
-
-      - name: Upload artifact (每次构建都保留)
-        uses: actions/upload-artifact@v4
+          hdiutil create -volname "$APP_NAME" \
+            -srcfolder "mac/build/$APP_NAME.app" \
+            -ov -format UDZO "MeiCodexHelper-${VERSION}-macos.dmg"
+          hdiutil verify "MeiCodexHelper-${VERSION}-macos.dmg" >/dev/null && echo "DMG 校验通过"
+      - uses: actions/upload-artifact@v4
         with:
-          name: MeiCodexHelper-dmg
-          path: MeiCodexHelper-*.dmg
+          name: macos-dmg
+          path: MeiCodexHelper-*-macos.dmg
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          files: MeiCodexHelper-*.dmg
+          python-version: '3.11'
+      - name: Build (PyInstaller x4)
+        shell: powershell
+        run: ./windows/build.ps1 -Version $env:VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: windows/dist/MeiCodexHelper-*-windows.zip
+
+  release:
+    needs: [prepare, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and release
+        run: |
+          find artifacts -name "*.dmg" -o -name "*.zip" | xargs -I{} cp {} .
+          ls -la *.dmg *.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          files: |
+            MeiCodexHelper-*.dmg
+            MeiCodexHelper-*.zip
           generate_release_notes: true

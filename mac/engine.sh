@@ -219,7 +219,8 @@ cmd_install() {
   migrate_config_keys
   write_default_config
   mkdir -p "$AS/bin" "$LOGS"
-  cp "$RES/relay.py" "$RES/tlsproxy.py" "$RES/netwatch.sh" "$AS/bin/" 2>/dev/null
+  cp "$RES/relay.py" "$RES/tlsproxy.py" "$RES/paths.py" "$RES/__init__.py" "$AS/bin/" 2>/dev/null
+  cp "$RES/netwatch.sh" "$AS/bin/" 2>/dev/null
   chmod +x "$AS/bin/"*.sh
   ensure_certs
   ensure_curl_cffi
