@@ -8,7 +8,8 @@ Set-Location $Root
 pip install -r requirements-build.txt --quiet
 if (-not $?) { throw "依赖安装失败" }
 
-# 托盘/EXE 图标: 从 core 生成脚本思路, 用 Pillow 直接绘制
+# 托盘/EXE 图标 (Pillow 直接绘制; assets 目录可能不存在于 checkout)
+New-Item -ItemType Directory -Force -Path assets | Out-Null
 python -c @"
 from PIL import Image, ImageDraw
 def draw(size):
