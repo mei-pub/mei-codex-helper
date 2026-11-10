@@ -7,6 +7,13 @@ import subprocess
 import sys
 import zipfile
 
+# Windows 控制台默认 cp1252: 进程内强制 UTF-8 (PYTHONIOENCODING 启动后才设无效)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 VERSION = sys.argv[1] if len(sys.argv) > 1 else '0.0.0-dev'
 os.chdir(ROOT)
