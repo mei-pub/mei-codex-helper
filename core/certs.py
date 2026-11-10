@@ -27,7 +27,7 @@ def gen(force=False):
     ca_pem = os.path.join(paths.CERTS_DIR, 'ca.pem')
     if not force and all(os.path.exists(os.path.join(paths.CERTS_DIR, f))
                          for f in ('ca.pem', 'cert.pem', 'key.pem')):
-        return '证书已存在, 跳过'
+        return 'certs: exists, skip'
     x509, hashes, serialization, rsa, NameOID = _ensure_cryptography()
     os.makedirs(paths.CERTS_DIR, exist_ok=True)
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -87,7 +87,7 @@ def gen(force=False):
     leaf_pem = leaf_cert.public_bytes(serialization.Encoding.PEM)
     ca_pem_bytes = ca_cert.public_bytes(serialization.Encoding.PEM)
     w(os.path.join(paths.CERTS_DIR, 'cert.pem'), leaf_pem + ca_pem_bytes)  # fullchain
-    return '已生成新证书链'
+    return 'certs: generated'
 
 
 def ipaddress_module():
