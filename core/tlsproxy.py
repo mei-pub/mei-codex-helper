@@ -119,6 +119,7 @@ def handle(conn):
             return
         log(f'CONNECT {host}:{port} ({"TLS" if first == bytes([0x16]) else "plain"})')
         conn.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+        conn.settimeout(None)  # 隧道为长连接: 静默期(上传/生图/长轮询)不因 20s 读超时被掐断
         t1 = threading.Thread(target=pump, args=(conn, up), daemon=True)
         t2 = threading.Thread(target=pump, args=(up, conn), daemon=True)
         t1.start(); t2.start(); t1.join(); t2.join()

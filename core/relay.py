@@ -87,7 +87,7 @@ def _upstream_worker():
 def upstream_call(fn):
     job = {'fn': fn, 'done': threading.Event()}
     UPSTREAM_Q.put(job)
-    if not job['done'].wait(200):
+    if not job['done'].wait(310):  # 须大于 _fetch 的 curl 总超时(生图等长任务)
         raise OSError('upstream worker timeout')
     if 'error' in job:
         raise job['error']
@@ -123,7 +123,9 @@ def open_raw_upstream(host=None):
         buf += d
     if b' 200 ' not in buf.split(b'\r\n', 1)[0]:
         raise OSError('CONNECT failed')
-    return ssl.create_default_context().wrap_socket(s, server_hostname=host)
+    tls = ssl.create_default_context().wrap_socket(s, server_hostname=host)
+    tls.settimeout(None)  # 长连接隧道: 阻塞收发, 静默期(如生图数十秒)不掐断
+    return tls
 
 
 def read_head(sock, initial=b''):
@@ -279,7 +281,7 @@ class Relay(BaseHTTPRequestHandler):
         def _fetch(sess):
             r = sess.request(self.command, UP + up_path, headers=headers,
                              data=body, proxies=PROXIES, impersonate=IMPERSONATE,
-                             allow_redirects=False, timeout=180)
+                             allow_redirects=False, timeout=300)  # 生图等长任务余量
             return r.status_code, list(r.headers.items()), r.content or b''
         try:
             status, up_headers, payload = upstream_call(_fetch)
