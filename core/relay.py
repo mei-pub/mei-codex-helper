@@ -300,6 +300,13 @@ class Relay(BaseHTTPRequestHandler):
         if 'json' in ct_full.lower():
             payload = payload.replace(f'wss://ws.{UP_HOST}'.encode(),
                                       f'wss://127.0.0.1:{PORT}/_ws/ws.{UP_HOST}'.encode())
+            # 远程控制注册挑战: 服务端签名的 targetOrigin 是真实域, 而本地客户端
+            # (防 CSRF)要求与 base_url 源一致 -> 改写为本地源; finish 请求仍经
+            # relay 回到真实域(Host 已改写), 服务端签名校验不受影响。
+            payload = re.sub(
+                rf'"targetOrigin":\s*"https://{re.escape(UP_HOST)}"'.encode(),
+                f'"targetOrigin": "https://127.0.0.1:{PORT}"'.encode(),
+                payload)
         snip = b' '.join(payload[:100].split()).decode('utf-8', 'replace')[:80]
         log(f'   resp {ct_full[:30]} | {snip}')
         self.send_response(status)
