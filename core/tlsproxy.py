@@ -24,6 +24,7 @@ MITM_UP_HOST = _c.get('upstream_host', 'chatgpt.com')
 MITM_IMPERSONATE = _c.get('impersonate', 'safari17_0')
 MITM_ENABLED = bool(_c.get('mitm_upstream', True))
 RELAY_TLS_PORT = int(_c.get('relay_tls_port', 8943))
+MITM_DIRECT_PORT = int(_c.get('mitm_direct_port', 8946))
 if MITM_ENABLED:
     MITM_HOSTS.add(MITM_UP_HOST)
 CERTS = os.path.join(AS_DIR, 'certs')
@@ -172,7 +173,7 @@ def _mitm_serve(conn, host):
             up = socks5_connect(host, 443)
             upctx = ssl.create_default_context()
             uptls = upctx.wrap_socket(up, server_hostname=host)
-            uptls.sendall(head.encode('latin1') + b'\r\n\r\n' + body[:clen])
+            uptls.sendall(head + b'\r\n\r\n' + body[:clen])  # head 已是 bytes
             def _p(a, b):
                 try:
                     while True:
@@ -343,7 +344,23 @@ def accept_loop(srv):
         threading.Thread(target=handle, args=(c,), daemon=True).start()
 
 
+def _mitm_direct_loop(direct):
+    while True:
+        c, _ = direct.accept()
+        threading.Thread(target=_mitm_serve, args=(c, MITM_UP_HOST), daemon=True).start()
+
+
 def main():
+    # 直连 MITM 监听: hosts+pf(443->本端口) 钉住后, 不认代理的 Node 客户端直达
+    try:
+        direct = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        direct.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        direct.bind(('127.0.0.1', MITM_DIRECT_PORT))
+        direct.listen(64)
+        threading.Thread(target=_mitm_direct_loop, args=(direct,), daemon=True).start()
+        log(f'MITM direct TLS listener on 127.0.0.1:{MITM_DIRECT_PORT} (for {MITM_UP_HOST})')
+    except OSError as e:
+        log(f'MITM direct listener 绑定失败 :{MITM_DIRECT_PORT}: {e}')
     accept_loop(start_listener())
 
 
