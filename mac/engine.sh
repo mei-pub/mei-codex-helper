@@ -285,6 +285,7 @@ cmd_launch_chatgpt() {
   open -a ChatGPT \
     --env "HTTPS_PROXY=$CP" --env "https_proxy=$CP" --env "ALL_PROXY=$SOCKS" \
     --env "NO_PROXY=localhost,127.0.0.1,::1" \
+    --env "NODE_USE_ENV_PROXY=1" \
     --env "SSL_CERT_FILE=$CERTS/ca.pem" --env "CODEX_CA_CERTIFICATE=$CERTS/ca.pem" \
     --env "NODE_EXTRA_CA_CERTS=$CERTS/ca.pem" \
     --env "WS_PROXY=$CP" --env "WSS_PROXY=$CP" \
