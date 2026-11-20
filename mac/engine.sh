@@ -97,12 +97,14 @@ patch_codex_config() {
   CT="$HOME/.codex/config.toml"
   TLS_PORT=$(cfg_get relay_tls_port 8943)
   [ -f "$CT" ] && cp "$CT" "$CT.bak-cnhelper"
+  # base_url 用真实域: 满足远程控制注册挑战的 origin 绑定;
+  # 流量经 ~/.codex/.env 的 HTTPS_PROXY(8944 MITM) -> relay 连接池 -> Safari 指纹出海
   if grep -q '^chatgpt_base_url' "$CT" 2>/dev/null; then
-    sed -i '' "s#^chatgpt_base_url *= .*#chatgpt_base_url = \"https://127.0.0.1:$TLS_PORT\"#" "$CT"
+    sed -i '' 's#^chatgpt_base_url *= .*#chatgpt_base_url = "https://chatgpt.com"#' "$CT"
   else
-    printf 'chatgpt_base_url = "https://127.0.0.1:%s"\n\n' "$TLS_PORT" | cat - "$CT" > /tmp/ct.new && mv /tmp/ct.new "$CT"
+    printf 'chatgpt_base_url = "https://chatgpt.com"\n\n' | cat - "$CT" > /tmp/ct.new && mv /tmp/ct.new "$CT"
   fi
-  echo "config.toml 已配置 base_url=https://127.0.0.1:$TLS_PORT"
+  echo "config.toml 已配置 base_url=https://chatgpt.com (经 8944 MITM)"
 }
 
 patch_codex_env() {
